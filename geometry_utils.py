@@ -36,18 +36,31 @@ def convex_hull(points):
     hull.append((x1, y1))
 
 
-def dissolve_lines(lines):
-  lines = list(lines) # ensure we have a list (and not an iterator)
+def dissolve_lines(lines, equal_dist=1.):
+  # immediatly return closed lines, retain only open lines for further processing
+  open_lines = []
+  for line in lines:
+    if line[0] == line[-1]:
+      yield line
+    else:
+      open_lines.append(line)
   lines_to_remove = set()
-  # iterate over all lines not schedules for removal
-  for line_idx, line in enumerate(lines):
+  # iterate over all lines that are not closed and not scheduled for removal
+  for line_idx, line in enumerate(open_lines):
     if line_idx not in lines_to_remove:
       overlap_len = 1
       while overlap_len > 0:
         # iterate over all other lines (and start over again whenever we found an overlapping one)
         overlap_len = 0
-        for other_idx, other_line in enumerate(lines):
+        for other_idx, other_line in enumerate(open_lines):
           if other_idx != line_idx and other_idx not in lines_to_remove:
+            # special case: the end point of the current line equals the start point of the other line
+            if (other_line[0][0] - line[-1][0])**2 + (other_line[0][1] - line[-1][1])**2 < equal_dist**2:
+              line.pop() # remove last point
+              line.extend(other_line) # append all points from the other line
+              lines_to_remove.add(other_idx)
+              overlap_len = 1 # ensure that we continue with that line
+              break
             # iterate through all points, except start and end point
             for lx, ly in line[1:-1]:
               if overlap_len + 2 > len(other_line):
@@ -56,7 +69,7 @@ def dissolve_lines(lines):
               # get the other line's first point after the overlap
               ox, oy = other_line[overlap_len + 1]
               # check whether these two are almost equal, in which case we have overlap
-              if (ox - lx)**2 + (oy - ly)**2 < 1.:
+              if (ox - lx)**2 + (oy - ly)**2 < equal_dist**2:
                 overlap_len += 1
               else:
                 overlap_len = 0
@@ -68,6 +81,6 @@ def dissolve_lines(lines):
               break
             overlap_len = 0
   # return lines that are not scheduled for removal
-  for line_idx, line in enumerate(lines):
+  for line_idx, line in enumerate(open_lines):
     if line_idx not in lines_to_remove:
       yield line
