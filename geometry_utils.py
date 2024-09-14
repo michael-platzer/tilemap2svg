@@ -39,6 +39,48 @@ def convex_hull(points):
     hull.append((x1, y1))
 
 
+def close_point_pairs(points_A, points_B, margin=1.):
+  points_A      = list(enumerate(points_A))
+  points_B      = list(enumerate(points_B))
+  # sort the points in A and B by ascending x coordinate
+  points_A.sort(key=lambda ept: ept[1][0])
+  points_B.sort(key=lambda ept: ept[1][0])
+  points_A      = iter(points_A)
+  points_B      = iter(points_B)
+  close_pts_A_x = SortedList(key=lambda ept: ept[1][0]) # close points from A sorted by x coordinate
+  close_pts_A_y = SortedList(key=lambda ept: ept[1][1]) # close points from A sorted by y coordinate
+  close_pts_B_x = SortedList(key=lambda ept: ept[1][0]) # close points from B sorted by x coordinate
+  close_pts_B_y = SortedList(key=lambda ept: ept[1][1]) # close points from B sorted by y coordinate
+  # repeatedly select the point with lowest x coordinate (either from A or B) to check next
+  idx_A, pt_A   = next(points_A)
+  idx_B, pt_B   = next(points_B)
+  while pt_A is not None or pt_B is not None:
+    if pt_A is not None and (pt_B is None or pt_A[0] < pt_B[0]):
+      # update lists of close points in B by removing all those whose x coordinate is out of range
+      for _ in range(close_pts_B_x.bisect_key_right(pt_A[0] - margin)):
+        close_pts_B_y.remove(close_pts_B_x.pop(0))
+      # find points from B that are close to the current point from A
+      for close_idx, close_pt in close_pts_B_y.irange_key(pt_A[1] - margin, pt_A[1] + margin):
+        if (pt_A[0] - close_pt[0])**2 + (pt_A[1] - close_pt[1])**2 < margin**2:
+          yield (idx_A, close_idx)
+      # add the current point from A to the lists of close points and fetch the next point from A
+      close_pts_A_x.add((idx_A, pt_A))
+      close_pts_A_y.add((idx_A, pt_A))
+      idx_A, pt_A = next(points_A, (None, None))
+    elif pt_B is not None:
+      # update lists of close points in A by removing all those whose x coordinate is out of range
+      for _ in range(close_pts_A_x.bisect_key_right(pt_B[0] - margin)):
+        close_pts_A_y.remove(close_pts_A_x.pop(0))
+      # find points from A that are close to the current point from B
+      for close_idx, close_pt in close_pts_A_y.irange_key(pt_B[1] - margin, pt_B[1] + margin):
+        if (pt_B[0] - close_pt[0])**2 + (pt_B[1] - close_pt[1])**2 < margin**2:
+          yield (close_idx, idx_B)
+      # add the current point from B to the lists of close points and fetch the next point from B
+      close_pts_B_x.add((idx_B, pt_B))
+      close_pts_B_y.add((idx_B, pt_B))
+      idx_B, pt_B = next(points_B, (None, None))
+
+
 def close_line_pairs(lines, margin=1.):
   # compute bounding boxes (with margin) for all lines
   bboxes = [(
@@ -104,46 +146,75 @@ def dissolve_lines(lines, equal_dist=1.):
     # translate indices in case they have been redirected
     idx1 = redirect_indices.get(idx1, idx1)
     idx2 = redirect_indices.get(idx2, idx2)
+    if idx1 == idx2:
+      continue
     # get lines
     line1 = open_lines[idx1]
     line2 = open_lines[idx2]
-    # check for overlaps between both lines
-    for (line_idx, line), (other_idx, other_line) in (
-      [((idx1, line1), (idx2, line2)), ((idx2, line2), (idx1, line1))] if idx1 != idx2 else []
-    ):
-      lines_merged = False
-      # special case: the end point of the current line equals the start point of the other line
-      if (other_line[0][0] - line[-1][0])**2 + (other_line[0][1] - line[-1][1])**2 < equal_dist**2:
-        line.pop() # remove last point
-        line.extend(other_line) # append all points from the other line
-        lines_merged = True
-      else:
-        for overlap_len in range(3, len(line)):
-          overlap = True
-          # compare all supposedly overlapping points for the given overlap amount
-          for (lx, ly), (ox, oy) in zip(line[-overlap_len:-1], other_line[1:]):
-            # check whether these two points are almost equal
-            if (ox - lx)**2 + (oy - ly)**2 > equal_dist**2:
-              overlap = False
-              break
-          if overlap:
-            # the other line might be shorter than the overlap, in which case it can be completely removed
-            if overlap_len < len(other_line):
-              line.pop() # remove last point of current line
-              line.extend(other_line[overlap_len:]) # append all points from other line after the overlap
-            lines_merged = True
+    #
+    line1_merged, line2_merged = False, False
+    # special case: the end point of one line equals the start point of the other line
+    if (line2[0][0] - line1[-1][0])**2 + (line2[0][1] - line1[-1][1])**2 < equal_dist**2:
+      line1.pop() # remove last point
+      line1.extend(line2) # append all points from the other line
+      line2_merged = True
+    elif (line1[0][0] - line2[-1][0])**2 + (line1[0][1] - line2[-1][1])**2 < equal_dist**2:
+      line2.pop() # remove last point
+      line2.extend(line1) # append all points from the other line
+      line1_merged = True
+    else:
+      # get pairs of close points between those lines
+      pairs = set(close_point_pairs(line1, line2, equal_dist))
+      # search for runs of close points at the start of one and the end of the other line
+      overlap_len_l1_l2 = 0     # length of longest overlap at end of line 1 and start of line 2
+      overlap_len_l2_l1 = 0     # length of longest overlap at start of line 1 and end of line 2
+      l1_covered        = False # line 1 is completely covered by line 2
+      l2_covered        = False # line 2 is completely covered by line 1
+      for pair in pairs:
+        run = [pair]
+        while True:
+          pair = (pair[0] + 1, pair[1] + 1)
+          if pair not in pairs:
             break
-      # remove the other line and cleanup if it was merged
-      if lines_merged:
-        open_lines[other_idx] = None
-        redirect_indices[other_idx] = line_idx
-        # update all redirects that currently point to the other line
-        redirects_to_other = set()
-        for old_idx, new_idx in redirect_indices.items():
-          if new_idx == other_idx:
-            redirects_to_other.add(old_idx)
-        redirect_indices.update((idx, line_idx) for idx in redirects_to_other)
-        break
+          run.append(pair)
+        # remember overlap for runs of at least two points at start of one and end of the other line
+        if len(run) > 1:
+          if run[-1][0] >= len(line1) - 2 and run[0][1] < 2:
+            overlap_len       = len(run) + run[0][1] + len(line1) - 1 - run[-1][0]
+            overlap_len_l1_l2 = max(overlap_len_l1_l2, overlap_len)
+          if run[-1][1] >= len(line2) - 2 and run[0][0] < 2:
+            overlap_len       = len(run) + run[0][0] + len(line2) - 1 - run[-1][1]
+            overlap_len_l2_l1 = max(overlap_len_l2_l1, overlap_len)
+        # check whether the run completely covers one of the lines
+        l1_covered = len(run) + 2 >= len(line1) and run[0][0] < 2 and run[-1][0] >= len(line1) - 2
+        l2_covered = len(run) + 2 >= len(line2) and run[0][1] < 2 and run[-1][1] >= len(line2) - 2
+      # merge lines based on longest overlap
+      if l1_covered:
+        line1_merged = True
+      elif l2_covered:
+        line2_merged = True
+      elif overlap_len_l1_l2 >= 3 and overlap_len_l1_l2 > overlap_len_l2_l1:
+        line1.pop() # remove last point of line 1
+        line1.extend(line2[overlap_len:]) # append all points of line 2 after the overlap
+        line2_merged = True
+      elif overlap_len_l2_l1 >= 3:
+        line2.pop() # remove last point of line 2
+        line2.extend(line1[overlap_len:]) # append all points of line 1 after the overlap
+        line1_merged = True
+    # remove the merged line and cleanup
+    if line1_merged:
+      open_lines[idx1] = None
+      redirect_indices[idx1] = idx2
+      # update all redirects that currently point to line 1 to point to line 2 instead
+      redirects_to_l1 = (old_idx for old_idx, new_idx in redirect_indices.items() if new_idx == idx1)
+      redirect_indices.update((idx, idx2) for idx in redirects_to_l1)
+    if line2_merged:
+      open_lines[idx2] = None
+      redirect_indices[idx2] = idx1
+      # update all redirects that currently point to line 2 to point to line 1 instead
+      redirects_to_l2 = (old_idx for old_idx, new_idx in redirect_indices.items() if new_idx == idx2)
+      redirect_indices.update((idx, idx1) for idx in redirects_to_l2)
+  print(f"iterated through {pair_cnt} pairs to dissolve lines")
   # return remaining lines
   for line in open_lines:
     if line is not None:
