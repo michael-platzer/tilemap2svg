@@ -90,18 +90,15 @@ def dissolve_lines(lines, equal_dist=1.):
   # immediatly return closed lines, retain only open lines for further processing
   open_lines = []
   for line in lines:
-    if line[0] == line[-1]:
+    if (line[0][0] - line[-1][0])**2 + (line[0][1] - line[-1][1])**2 < equal_dist**2:
       yield line
     else:
       open_lines.append(line)
-  # get pairs of lines that are close to eachother
-  pairs = close_line_pairs(open_lines, equal_dist)
-  print(f"iterating through {len(pairs)} pairs to dissolve lines")
-  # re-organize open lines into a dictionary for faster indexing and removal
-  open_lines = dict(enumerate(open_lines))
-  # iterate through the pairs, with an option to redirect indices to a new line
+  # iterate through pairs of lines that are close to eachother, with an option to redirect indices to a new line
   redirect_indices = {}
-  for idx1, idx2 in pairs:
+  pair_cnt = 0
+  for idx1, idx2 in close_line_pairs(open_lines, equal_dist):
+    pair_cnt += 1
     # translate indices in case they have been redirected
     idx1 = redirect_indices.get(idx1, idx1)
     idx2 = redirect_indices.get(idx2, idx2)
@@ -119,27 +116,24 @@ def dissolve_lines(lines, equal_dist=1.):
         line.extend(other_line) # append all points from the other line
         lines_merged = True
       else:
-        # iterate through all points, except start and end point
-        overlap_len = 0
-        for lx, ly in line[1:-1]:
-          if overlap_len + 2 > len(other_line):
-            overlap_len = 0
+        for overlap_len in range(3, len(line)):
+          overlap = True
+          # compare all supposedly overlapping points for the given overlap amount
+          for (lx, ly), (ox, oy) in zip(line[-overlap_len:-1], other_line[1:]):
+            # check whether these two points are almost equal
+            if (ox - lx)**2 + (oy - ly)**2 > equal_dist**2:
+              overlap = False
+              break
+          if overlap:
+            # the other line might be shorter than the overlap, in which case it can be completely removed
+            if overlap_len < len(other_line):
+              line.pop() # remove last point of current line
+              line.extend(other_line[overlap_len:]) # append all points from other line after the overlap
+            lines_merged = True
             break
-          # get the other line's first point after the overlap
-          ox, oy = other_line[overlap_len + 1]
-          # check whether these two are almost equal, in which case we have overlap
-          if (ox - lx)**2 + (oy - ly)**2 < equal_dist**2:
-            overlap_len += 1
-          else:
-            overlap_len = 0
-        # once at the end of the current line, merge if at least the last segment overlapped the other line
-        if overlap_len >= 2:
-          line.pop() # remove last point
-          line.extend(other_line[overlap_len+1:]) # append all points from other line after the overlap
-          lines_merged = True
       # remove the other line and cleanup if it was merged
       if lines_merged:
-        open_lines.pop(other_idx)
+        open_lines[other_idx] = None
         redirect_indices[other_idx] = line_idx
         # update all redirects that currently point to the other line
         redirects_to_other = set()
@@ -149,5 +143,6 @@ def dissolve_lines(lines, equal_dist=1.):
         redirect_indices.update((idx, line_idx) for idx in redirects_to_other)
         break
   # return remaining lines
-  for line_idx, line in open_lines.items():
-    yield line
+  for line in open_lines:
+    if line is not None:
+      yield line
