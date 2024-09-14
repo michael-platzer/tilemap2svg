@@ -1,27 +1,30 @@
+from sortedcontainers import SortedList
 
 def convex_hull(points):
   points = list(points) # ensure we have a list (and not an iterator)
-  # find up to 8 points that are for sure part of the convex hull
-  pts_on_hull = [
-    min(points, key=lambda pt: pt[0]        ), # smallest x coordinate (leftmost)
-    min(points, key=lambda pt: pt[0] + pt[1]), # smallest x + y (most to the bottom-left)
-    min(points, key=lambda pt: pt[1]        ), # smallest y coordinate (bottom-most)
-    min(points, key=lambda pt: pt[1] - pt[0]), # smallest y - x (most to the bottom-right)
-    max(points, key=lambda pt: pt[0]        ), # largest  x coordinate (rightmost)
-    max(points, key=lambda pt: pt[0] + pt[1]), # largest  x + y (most to the top-right)
-    max(points, key=lambda pt: pt[1]        ), # largest  y coordinate (topmost)
-    max(points, key=lambda pt: pt[1] - pt[0])  # largest  y - x (most to the top-left)
-  ]
-  # remove duplicates (dict maintains insertion order since Python 3.7)
-  pts_on_hull = list(dict.fromkeys(pts_on_hull))
-  # remove all points that are inside these initial points by testing whether each point is to the
-  # right of any of the segments of our initial set of points (if it is to the right of any segment
-  # it lies outside and if it is to the left of all segments it lies inside)
-  points = [(x, y) for (x, y) in points if any(
-    # point (x, y) lies to the right of ((x0, y0),(x1, y1)) if the cosine sign is positive
-    (x, y) == (x0, y0) or (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) > 0 for (x0, y0), (x1, y1) in
-    zip(pts_on_hull, pts_on_hull[1:] + pts_on_hull[:1])
-  )]
+  # if the line has more than 100 points, try to eliminate as many as possible first
+  if len(points) > 100:
+    # find up to 8 points that are for sure part of the convex hull
+    pts_on_hull = [
+      min(points, key=lambda pt: pt[0]        ), # smallest x coordinate (leftmost)
+      min(points, key=lambda pt: pt[0] + pt[1]), # smallest x + y (most to the bottom-left)
+      min(points, key=lambda pt: pt[1]        ), # smallest y coordinate (bottom-most)
+      min(points, key=lambda pt: pt[1] - pt[0]), # smallest y - x (most to the bottom-right)
+      max(points, key=lambda pt: pt[0]        ), # largest  x coordinate (rightmost)
+      max(points, key=lambda pt: pt[0] + pt[1]), # largest  x + y (most to the top-right)
+      max(points, key=lambda pt: pt[1]        ), # largest  y coordinate (topmost)
+      max(points, key=lambda pt: pt[1] - pt[0])  # largest  y - x (most to the top-left)
+    ]
+    # remove duplicates (dict maintains insertion order since Python 3.7)
+    pts_on_hull = list(dict.fromkeys(pts_on_hull))
+    # remove all points that are inside these initial points by testing whether each point is to the
+    # right of any of the segments of our initial set of points (if it is to the right of any segment
+    # it lies outside and if it is to the left of all segments it lies inside)
+    points = [(x, y) for (x, y) in points if any(
+      # point (x, y) lies to the right of ((x0, y0),(x1, y1)) if the cosine sign is positive
+      (x, y) == (x0, y0) or (x1 - x0) * (y - y0) - (y1 - y0) * (x - x0) > 0 for (x0, y0), (x1, y1) in
+      zip(pts_on_hull, pts_on_hull[1:] + pts_on_hull[:1])
+    )]
   # compute convex hull using Jarvis's march on the remaining points
   hull = [min(points, key=lambda pt: pt[0])] # start with leftmost point
   while True:
