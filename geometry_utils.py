@@ -45,35 +45,45 @@ def close_line_pairs(lines, margin=1.):
     (min(x for x, y in line) - margin, min(y for x, y in line) - margin),
     (max(x for x, y in line)         , max(y for x, y in line)         )
   ) for line in lines]
-  # list of bounding box boundaries, once along x and once along y dimension
-  bounds_x, bounds_y = (
-    [(x0, False, idx) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)] + # start coordinates
-    [(x1, True , idx) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)]   # end coordinates
-  ), (
-    [(y0, False, idx) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)] + # start coordinates
-    [(y1, True , idx) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)]   # end coordinates
+  # box boundaries in x direction, along with info about y extent of each box
+  bounds_x = (
+    [(x0, True , idx, (y0, y1)) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)] + # start coords
+    [(x1, False, idx, (y0, y1)) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)]   # end coords
   )
-  bounds_x = sorted(bounds_x, key=lambda bound: bound[0])
-  bounds_y = sorted(bounds_y, key=lambda bound: bound[0])
-  # compute sets of overlapping pairs once along x and once along y dimension
-  pairs_x, pairs_y = set(), set()
-  active_boxes = set()
-  for _, end, box_idx in bounds_x:
-    if end:
-      active_boxes.remove(box_idx)
+  # return indices of close line pairs (lines with overlapping bounding boxes)
+  active_boxes_intervals = SortedList(key=lambda bound_y: bound_y[0])
+  for _, start, box_idx, range_y in sorted(bounds_x, key=lambda bound: bound[0]):
+    if start:
+      y0_idx            = active_boxes_intervals.bisect_key_left(range_y[0])
+      y1_idx            = active_boxes_intervals.bisect_key_right(range_y[1])
+      active_boxes_iter = active_boxes_intervals.islice(max(y0_idx - 1, 0), y1_idx + 1)
+      pre_active_boxes  = next(active_boxes_iter)[2] if y0_idx > 0 else set()
+      active_boxes_y0   = None
+      overlapping_boxes = set()
+      active_boxes      = set()
+      for _ in range(y1_idx - y0_idx):
+        active_boxes       = next(active_boxes_iter)[2]
+        overlapping_boxes |= active_boxes
+        if active_boxes_y0 is None:
+          active_boxes_y0 = pre_active_boxes & active_boxes
+        active_boxes.add(box_idx)
+      active_boxes_y1 = active_boxes & next(active_boxes_iter, (None, None, set()))[2]
+      active_boxes_intervals.add((range_y[0], box_idx, active_boxes_y0 | {box_idx} if active_boxes_y0 is not None else {box_idx}))
+      active_boxes_intervals.add((range_y[1], box_idx, active_boxes_y1 | {box_idx}))
+      for idx in overlapping_boxes:
+        yield (box_idx, idx) if box_idx < idx else (idx, box_idx)
     else:
-      pairs_x |= {((box_idx, idx) if box_idx < idx else (idx, box_idx)) for idx in active_boxes}
-      active_boxes.add(box_idx)
-  assert len(active_boxes) == 0
-  for _, end, box_idx in bounds_y:
-    if end:
-      active_boxes.remove(box_idx)
-    else:
-      pairs_y |= {((box_idx, idx) if box_idx < idx else (idx, box_idx)) for idx in active_boxes}
-      active_boxes.add(box_idx)
-  assert len(active_boxes) == 0
-  # pairs appearing in both sets are those for which bounding boxes effectively do overlap
-  return pairs_x & pairs_y
+      active_boxes_y0, active_boxes_y1 = None, None
+      for _, idx, active_boxes in active_boxes_intervals.irange_key(range_y[0], range_y[1]):
+        active_boxes.discard(box_idx)
+        if idx == box_idx:
+          if active_boxes_y0 is None:
+            active_boxes_y0 = active_boxes
+          else:
+            active_boxes_y1 = active_boxes
+      active_boxes_intervals.remove((range_y[0], box_idx, active_boxes_y0))
+      active_boxes_intervals.remove((range_y[1], box_idx, active_boxes_y1))
+  assert len(active_boxes_intervals) == 0
 
 
 def dissolve_lines(lines, equal_dist=1.):
