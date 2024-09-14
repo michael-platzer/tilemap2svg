@@ -50,9 +50,11 @@ def close_line_pairs(lines, margin=1.):
     [(x0, True , idx, (y0, y1)) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)] + # start coords
     [(x1, False, idx, (y0, y1)) for idx, ((x0, y0), (x1, y1)) in enumerate(bboxes)]   # end coords
   )
+  # sort the box boundaries by x coordinate
+  bounds_x.sort(key=lambda bound: bound[0])
   # return indices of close line pairs (lines with overlapping bounding boxes)
   active_boxes_intervals = SortedList(key=lambda bound_y: bound_y[0])
-  for _, start, box_idx, range_y in sorted(bounds_x, key=lambda bound: bound[0]):
+  for _, start, box_idx, range_y in bounds_x:
     if start:
       y0_idx            = active_boxes_intervals.bisect_key_left(range_y[0])
       y1_idx            = active_boxes_intervals.bisect_key_right(range_y[1])
