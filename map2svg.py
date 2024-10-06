@@ -1,7 +1,7 @@
 import json
 import math
 import tilemap
-from geometry_utils import convex_hull, dissolve_lines
+from geometry_utils import convex_hull, dissolve_lines, polygonize_clipped_lines
 
 map_config = None
 with open('map_config.json') as cfg:
@@ -36,13 +36,13 @@ with open('test.svg', 'w') as svg:
 
     # query shapes and store those of same type, layer, and with same tags in one list
     shapes = {}
-    for shape_type, coords, layer_name, tags in tmap.query_shapes(src['zoom'], viewport, filters):
+    for shape_type, coords, layer_name, tags, tile_box in tmap.query_shapes(src['zoom'], viewport, filters):
       shape_class = (shape_type, layer_name, tuple(tags.items()))
-      shapes[shape_class] = shapes.get(shape_class, []) + [coords]
+      shapes[shape_class] = shapes.get(shape_class, []) + [(coords, tile_box)]
 
     for shape_class in shapes:
       shape_type, layer_name, tags = shape_class
-      print(f"  - shapes of type {shape_type} from layer {layer_name} with tags {dict(tags)}: {len(shapes[shape_class])}")
+      print(f"  - shapes of type {shape_type} from layer {layer_name} with tags {dict(tags)}: {len(shapes[shape_class])} of which {sum(1 for coords, _ in shapes[shape_class] if coords[0] == coords[-1])} are closed")
 
     for grp in src['groups']:
       grp_attr = ' '.join(f"{key}=\"{val}\"" for key, val in grp.get('attributes', {}).items())
@@ -61,7 +61,19 @@ with open('test.svg', 'w') as svg:
             if val2 in tags:
               val2 = tags[val2]
             if eval(f"{val1} {op} {val2}"):
-              shape_list = shapes[shape_class]
+              if 'polygonize' in grp.get('processing', {}):
+                args = grp['processing']['polygonize']
+                tile_shapes = {}
+                for coords, tile_box in shapes[shape_class]:
+                  tile_shapes[tile_box] = tile_shapes.get(tile_box, []) + [coords]
+                shapes[shape_class] = [
+                  (coords, tile_box)
+                  for tile_box, shapes in tile_shapes.items()
+                  for coords in polygonize_clipped_lines(shapes, tile_box, args.get("corner_outset", 1.))
+                ]
+                #shapes[shape_class] = [(polygonize_clipped_lines(coords, tile_box, args.get("corner_margin", 1.)), tile_box) for coords, tile_box in shapes[shape_class]]
+
+              shape_list = [coords for coords, _ in shapes[shape_class]]
 
               for proc, args in grp.get('processing', {}).items():
 

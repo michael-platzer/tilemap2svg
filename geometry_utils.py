@@ -1,4 +1,5 @@
 from sortedcontainers import SortedList
+import math
 
 def convex_hull(points):
   points = list(points) # ensure we have a list (and not an iterator)
@@ -232,3 +233,46 @@ def dissolve_lines(lines, equal_dist=1.):
   for line in open_lines:
     if line is not None:
       yield line
+
+
+def polygonize_clipped_lines(lines, bbox, corner_outset=1.):
+  lines = list(lines) # ensure we have a list (and not an iterator)
+  # gather line endpoints outside bounding box
+  outside_endpoints = [
+    (math.atan2(pt[1] - (bbox[0][1] + bbox[1][1]) / 2., pt[0] - (bbox[0][0] + bbox[1][0]) / 2), line_idx, start)
+    for line_idx, line in enumerate(lines) if line[0] != line[-1]
+    for pt, start in [(line[0], True), (line[-1], False)] if pt[0] < bbox[0][0] or pt[0] > bbox[1][0] or pt[1] < bbox[0][1] or pt[1] > bbox[1][1]
+  ]
+  # sort endpoints outside bounding box in clockwise order (note: y-axis is inverted)
+  outside_endpoints.sort(key=lambda elem: elem[0])
+  # iterate through endpoints that are actually the end of a line (and not the start)
+  merged_lines = {}
+  for end_pt_idx, (end_angle, end_line_idx, _) in ((idx, pt) for idx, pt in enumerate(outside_endpoints) if not pt[2]):
+    start_pt_idx = end_pt_idx + 1
+    start_angle, start_line_idx, start_start = outside_endpoints[start_pt_idx % len(outside_endpoints)]
+    if start_start:
+      start_line_idx = merged_lines.get(start_line_idx, start_line_idx)
+      end_line_idx   = merged_lines.get(end_line_idx  , end_line_idx  )
+      line = lines[end_line_idx]
+      # insert corners into the line as needed
+      if start_pt_idx >= len(outside_endpoints):
+        start_angle += 2*math.pi
+      for corner_angle, corner_pt in [
+        (-( 3./4.)*math.pi, (bbox[0][0] - corner_outset, bbox[0][1] - corner_outset)),
+        (-( 1./4.)*math.pi, (bbox[1][0] + corner_outset, bbox[0][1] - corner_outset)),
+        (+( 1./4.)*math.pi, (bbox[1][0] + corner_outset, bbox[1][1] + corner_outset)),
+        (+( 3./4.)*math.pi, (bbox[0][0] - corner_outset, bbox[1][1] + corner_outset)),
+        (+( 5./4.)*math.pi, (bbox[0][0] - corner_outset, bbox[0][1] - corner_outset)),
+        (+( 7./4.)*math.pi, (bbox[1][0] + corner_outset, bbox[0][1] - corner_outset)),
+        (+( 9./4.)*math.pi, (bbox[1][0] + corner_outset, bbox[1][1] + corner_outset)),
+        (+(11./4.)*math.pi, (bbox[0][0] - corner_outset, bbox[1][1] + corner_outset))
+      ]:
+        if end_angle < corner_angle < start_angle:
+          line.append(corner_pt)
+      if start_line_idx == end_line_idx:
+        line.append(line[0])
+      else:
+        line.extend(lines[start_line_idx])
+        merged_lines[start_line_idx] = end_line_idx
+        merged_lines.update([(key, end_line_idx) for key, val in merged_lines.items() if val == start_line_idx])
+  return [line for idx, line in enumerate(lines) if idx not in merged_lines]

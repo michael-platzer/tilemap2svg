@@ -203,6 +203,7 @@ class VectorTileMap:
                 self.orig[0] + tile_pos[0] * lod_scale,
                 self.orig[1] + tile_pos[1] * lod_scale
             )
+            tile_box   = ((x0, y0), (x0 + lod_scale, y0 + lod_scale))
             tile_scale = lod_scale / layer_extent
             shape = None
             pos   = (0, 0)
@@ -221,7 +222,7 @@ class VectorTileMap:
                         if op == 1:
                             # yield the current shape (if any)
                             if shape is not None:
-                                yield (feature.type, shape, layer_name, tags)
+                                yield (feature.type, shape, layer_name, tags, tile_box)
                             # start a new shape
                             shape = [(x0 + pos[0] * tile_scale, y0 + pos[1] * tile_scale)]
                         elif op == 2:
@@ -234,4 +235,4 @@ class VectorTileMap:
                     op = None
             # yield the last shape (if any)
             if shape is not None:
-                yield (feature.type, shape, layer_name, tags)
+                yield (feature.type, shape, layer_name, tags, tile_box)
